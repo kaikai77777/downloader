@@ -61,11 +61,9 @@ def process_media():
     }
 
     # ---------- MP4 ----------
-    if target_format == "mp4":
-        ydl_opts["format"] = (
-            "bestvideo[ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]/"
-            "best[ext=mp4][vcodec^=avc1]"
-        )
+if target_format == "mp4":
+    ydl_opts["format"] = "bestvideo+bestaudio/best"
+
 
     # ---------- MP3 ----------
     if target_format == "mp3":
