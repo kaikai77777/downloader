@@ -1,4 +1,5 @@
 from flask import Flask, request, send_file, jsonify
+from flask import send_from_directory
 from flask_cors import CORS
 import os
 import uuid
@@ -112,7 +113,9 @@ def process_media():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
+        
+def serve_frontend():
+    return send_from_directory('.', 'index.html')
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)
