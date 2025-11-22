@@ -1,6 +1,6 @@
-# app.py - 最終版，支援 mp4/mp3 正常輸出 + 影片標題作為下載檔名
+# app.py - Render 最終版，可正確輸出 MP4/MP3 + 首頁 UI + 影片標題檔名
 
-from flask import Flask, request, send_file, jsonify
+from flask import Flask, request, send_file, jsonify, send_from_directory
 from flask_cors import CORS
 import os
 import uuid
@@ -9,9 +9,13 @@ import yt_dlp
 import urllib.parse
 
 app = Flask(__name__)
-
-# 🔥 讓前端可讀取 Content-Disposition（否則檔名會變 download.mp4）
 CORS(app, expose_headers=["Content-Disposition"])
+
+# 🔥 Render 首頁：回傳 index.html
+@app.route('/')
+def home():
+    return send_from_directory('.', 'index.html')
+
 
 # ----------- 系統暫存資料夾 -----------
 TEMP_DIR = tempfile.gettempdir()
@@ -34,7 +38,7 @@ def sanitize_filename(filename):
 def process_media():
     data = request.get_json()
     source_url = data.get('url')
-    target_format = data.get('format')   # mp4 或 mp3
+    target_format = data.get('format')
 
     if not source_url or target_format not in ['mp4', 'mp3']:
         return jsonify({'error': 'Invalid URL or format parameter.'}), 400
@@ -52,16 +56,17 @@ def process_media():
         "quiet": True,
         "noplaylist": True,
         "merge_output_format": "mp4",
-        "ffmpeg_location": "./bin",     # 指定你的 ffmpeg 位置
+        "ffmpeg_location": "./bin",
     }
 
-    # ---------- MP4 下載設定 ----------
+    # ---------- MP4 ----------
     if target_format == "mp4":
-       ydl_opts["format"] = (
-        "bestvideo[ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]/"
-        "best[ext=mp4][vcodec^=avc1]"
-    )
-    # ---------- MP3 下載設定 ----------
+        ydl_opts["format"] = (
+            "bestvideo[ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]/"
+            "best[ext=mp4][vcodec^=avc1]"
+        )
+
+    # ---------- MP3 ----------
     if target_format == "mp3":
         ydl_opts.update({
             "format": "bestaudio/best",
@@ -79,25 +84,23 @@ def process_media():
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(source_url, download=True)
 
-        # 取得影片標題
         title = sanitize_filename(info.get("title", "video"))
         ext = "mp3" if target_format == "mp3" else "mp4"
 
-        # 在暫存資料夾中尋找 yt-dlp 生成的檔案
+        # 找到輸出檔
         for fname in os.listdir(APP_TEMP_DIR):
             if fname.startswith(unique_id) and fname.endswith(f".{ext}"):
                 final_filepath = os.path.join(APP_TEMP_DIR, fname)
                 break
 
-        if not final_filepath or not os.path.exists(final_filepath):
-            raise Exception("yt-dlp 下載後找不到輸出檔案")
+        if not final_filepath:
+            raise Exception("找不到 yt-dlp 輸出的檔案！")
 
         print(f"最終檔案: {final_filepath}")
 
-        # 下載時顯示的檔名 = 影片標題.mp4 / .mp3
         download_name = f"{title}.{ext}"
 
-        mime_type = f"video/{ext}" if ext == "mp4" else f"audio/{ext}"
+        mime_type = "video/mp4" if ext == "mp4" else "audio/mp3"
 
         response = send_file(
             final_filepath,
@@ -106,13 +109,12 @@ def process_media():
             mimetype=mime_type
         )
 
-        # 修正中文檔名
         quoted = urllib.parse.quote(download_name)
         response.headers["Content-Disposition"] = (
             f"attachment; filename=\"{quoted}\"; filename*=UTF-8''{quoted}"
         )
 
-        # 自動清理所有相關檔案
+        # 自動清理
         @response.call_on_close
         def cleanup():
             for f in os.listdir(APP_TEMP_DIR):
@@ -131,4 +133,4 @@ def process_media():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    app.run(host="0.0.0.0", port=5000)
