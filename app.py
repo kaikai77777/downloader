@@ -57,6 +57,7 @@ def process_media():
         "noplaylist": True,
         "merge_output_format": "mp4",
         "ffmpeg_location": "./bin",
+        "cookiefile": "./cookies/cookies.txt"   # ← 加這行！
     }
 
     # ---------- MP4 ----------
