@@ -9,6 +9,8 @@ import urllib.parse
 app = Flask(__name__)
 CORS(app, expose_headers=["Content-Disposition"])  # 讓前端能讀取檔名
 
+def home():
+    return send_from_directory(".", "index.html")
 # 暫存資料夾
 TEMP_DIR = tempfile.gettempdir()
 APP_TEMP_DIR = os.path.join(TEMP_DIR, "yt_dlp_processor_temp")
