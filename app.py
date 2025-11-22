@@ -1,4 +1,4 @@
-from flask import Flask, request, send_file, jsonify
+from flask import Flask, request, send_file, jsonify, send_from_directory
 from flask_cors import CORS
 import os
 import uuid
@@ -6,92 +6,86 @@ import tempfile
 import yt_dlp
 import urllib.parse
 
-app = Flask(__name__)
-CORS(app, expose_headers=["Content-Disposition"])  # 讓前端能讀取檔名
+app = Flask(__name__, static_folder=".")
+CORS(app, expose_headers=["Content-Disposition"])
 
+# 指定 Render 的正確專案路徑
+BASE_DIR = "/opt/render/project/src"
+
+# 讓前端首頁正常顯示
+@app.route("/")
 def home():
-    return send_from_directory(".", "index.html")
+    return send_from_directory(BASE_DIR, "index.html")
+
+
 # 暫存資料夾
 TEMP_DIR = tempfile.gettempdir()
-APP_TEMP_DIR = os.path.join(TEMP_DIR, "yt_dlp_processor_temp")
+APP_TEMP_DIR = os.path.join(TEMP_DIR, 'yt_dlp_processor_temp')
 if not os.path.exists(APP_TEMP_DIR):
     os.makedirs(APP_TEMP_DIR)
 
-# 你的 cookies.txt
-COOKIES_PATH = "./cookies/cookies.txt"
+
+def sanitize_filename(filename):
+    illegal_chars = ['<', '>', ':', '"', '/', '\\', '|', '?', '*']
+    for char in illegal_chars:
+        filename = filename.replace(char, '_')
+    return filename
 
 
-def sanitize_filename(name):
-    bad = ['<', '>', ':', '"', '/', '\\', '|', '?', '*']
-    for c in bad:
-        name = name.replace(c, "_")
-    return name
-
-
-@app.route("/api/process", methods=["POST"])
+@app.route('/api/process', methods=['POST'])
 def process_media():
     data = request.get_json()
-    source_url = data.get("url")
-    target_format = data.get("format")
+    source_url = data.get('url')
+    target_format = data.get('format')
 
-    if not source_url or target_format not in ["mp4", "mp3"]:
-        return jsonify({"error": "Invalid URL or format"}), 400
+    if not source_url or target_format not in ['mp4', 'mp3']:
+        return jsonify({'error': 'Invalid URL or format parameter.'}), 400
 
     unique_id = str(uuid.uuid4())
-    output_template = os.path.join(APP_TEMP_DIR, f"{unique_id}_%(title)s.%(ext)s")
+    base_output = os.path.join(APP_TEMP_DIR, f"{unique_id}_%(title)s.%(ext)s")
 
-    # 基本設定
+    cookies_path = os.path.join(BASE_DIR, "cookies/cookies.txt")
+
     ydl_opts = {
-        "outtmpl": output_template,
+        "outtmpl": base_output,
         "quiet": True,
         "noplaylist": True,
-        "cookiefile": COOKIES_PATH,      # 🔥 使用 cookies.txt
         "merge_output_format": "mp4",
-        "ffmpeg_location": "./bin",       # Render 不會用到，但本地會
+        "ffmpeg_location": os.path.join(BASE_DIR, "bin"),
+        "cookiefile": cookies_path
     }
 
-    # --- MP4 設定（最相容） ---
     if target_format == "mp4":
         ydl_opts["format"] = "bestvideo+bestaudio/best"
-
-    # --- MP3 設定 ---
-    if target_format == "mp3":
-        ydl_opts.update({
-            "format": "bestaudio/best",
-            "postprocessors": [{
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "mp3",
-                "preferredquality": "192",
-            }],
-        })
+    else:
+        ydl_opts["format"] = "bestaudio/best"
+        ydl_opts["postprocessors"] = [{
+            "key": "FFmpegExtractAudio",
+            "preferredcodec": "mp3",
+            "preferredquality": "192",
+        }]
 
     try:
-        # 執行 yt-dlp
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(source_url, download=True)
 
         title = sanitize_filename(info.get("title", "video"))
         ext = "mp3" if target_format == "mp3" else "mp4"
 
-        final_path = None
+        final_filepath = None
+        for fname in os.listdir(APP_TEMP_DIR):
+            if fname.startswith(unique_id) and fname.endswith(f".{ext}"):
+                final_filepath = os.path.join(APP_TEMP_DIR, fname)
 
-        # 找到輸出檔案
-        for f in os.listdir(APP_TEMP_DIR):
-            if f.startswith(unique_id) and f.endswith(f".{ext}"):
-                final_path = os.path.join(APP_TEMP_DIR, f)
-                break
-
-        if not final_path:
-            raise Exception("Cannot locate downloaded file")
+        if not final_filepath:
+            raise Exception("下載後找不到檔案")
 
         download_name = f"{title}.{ext}"
-        mime = "video/mp4" if ext == "mp4" else "audio/mp3"
-
         response = send_file(
-            final_path,
+            final_filepath,
             as_attachment=True,
             download_name=download_name,
-            mimetype=mime
+            mimetype="video/mp4" if ext == "mp4" else "audio/mp3"
         )
 
         quoted = urllib.parse.quote(download_name)
@@ -111,9 +105,4 @@ def process_media():
         return response
 
     except Exception as e:
-        print("Error:", e)
         return jsonify({"error": str(e)}), 500
-
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
